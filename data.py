@@ -51,29 +51,6 @@ class RandomCrop:
         self.random_crop.labels_format = self.labels_format
         return self.random_crop(image, labels, return_inverter)
 
-
-class Expand:
-    def __init__(self, background=(123, 117, 104),
-                 labels_format={'class_id': 0, 'xmin': 1, 'ymin': 2, 'xmax': 3, 'ymax': 4}):
-        self.labels_format = labels_format
-        self.patch_coord_generator = PatchCoordinateGenerator(must_match='h_w',
-                                                              min_scale=1.0,
-                                                              max_scale=4.0,
-                                                              scale_uniformly=True)
-        self.expand = RandomPatch(patch_coord_generator=self.patch_coord_generator,
-                                  box_filter=None,
-                                  image_validator=None,
-                                  n_trials_max=1,
-                                  clip_boxes=False,
-                                  prob=0.5,
-                                  background=background,
-                                  labels_format=self.labels_format)
-
-    def __call__(self, image, labels=None, return_inverter=False):
-        self.expand.labels_format = self.labels_format
-        return self.expand(image, labels, return_inverter)
-
-
 class PhotometricDistortions:
     def __init__(self):
         self.convert_RGB_to_HSV = ConvertColor(current='RGB', to='HSV')
@@ -116,7 +93,6 @@ class DataAugmentation:
         self.labels_format = labels_format
 
         self.photometric_distortions = PhotometricDistortions()
-        self.expand = Expand(background=background, labels_format=self.labels_format)
         self.random_crop = RandomCrop(labels_format=self.labels_format)
         self.random_flip = RandomFlip(dim='horizontal', prob=0.5, labels_format=self.labels_format)
 
@@ -125,36 +101,22 @@ class DataAugmentation:
                                     check_degenerate=True,
                                     labels_format=self.labels_format)
 
-        self.resize = ResizeRandomInterp(height=image_height,
-                                         width=image_width,
-                                         interpolation_modes=[cv2.INTER_NEAREST,
-                                                              cv2.INTER_LINEAR,
-                                                              cv2.INTER_CUBIC,
-                                                              cv2.INTER_AREA,
-                                                              cv2.INTER_LANCZOS4],
-                                         box_filter=self.box_filter,
-                                         labels_format=self.labels_format)
-
-        self.sequence = [self.photometric_distortions,
-                         self.expand,
-                         self.random_crop,
-                         self.random_flip,
-                         self.resize]
+        self.sequence = [
+            self.photometric_distortions,
+            self.expand,
+            self.random_crop,
+            self.random_flip,
+                        ]
 
     def __call__(self, image, labels, return_inverter=False):
         self.expand.labels_format = self.labels_format
         self.random_crop.labels_format = self.labels_format
         self.random_flip.labels_format = self.labels_format
-        self.resize.labels_format = self.labels_format
 
         inverters = []
 
         for transform in self.sequence:
-            if return_inverter and ('return_inverter' in inspect.signature(transform).parameters):
-                image, labels, inverter = transform(image, labels, return_inverter=True)
-                inverters.append(inverter)
-            else:
-                image, labels = transform(image, labels)
+            image, labels = transform(image, labels)
 
         if return_inverter:
             return image, labels, inverters[::-1]
@@ -397,27 +359,8 @@ class DataGenerator:
                 if transformations:
                     inverse_transforms = []
                     for transform in transformations:
-                        if not (self.labels is None):
-                            if ('inverse_transform' in returns) and (
-                                    'return_inverter' in inspect.signature(transform).parameters):
-                                batch_X[i], batch_y[i], inverse_transform = transform(batch_X[i], batch_y[i],
-                                                                                      return_inverter=True)
-                                inverse_transforms.append(inverse_transform)
-                            else:
-                                batch_X[i], batch_y[i] = transform(batch_X[i], batch_y[i])
-                            if batch_X[i] is None:
-                                batch_items_to_remove.append(i)
-                                batch_inverse_transforms.append([])
-                                continue
-
-                        else:
-                            if ('inverse_transform' in returns) and (
-                                    'return_inverter' in inspect.signature(transform).parameters):
-                                batch_X[i], inverse_transform = transform(batch_X[i], return_inverter=True)
-                                inverse_transforms.append(inverse_transform)
-                            else:
-                                batch_X[i] = transform(batch_X[i])
-
+                        batch_X[i], batch_y[i], inverse_transform = transform(batch_X[i], batch_y[i], return_inverter=True)
+                        inverse_transforms.append(inverse_transform)
                     batch_inverse_transforms.append(inverse_transforms[::-1])
 
             if batch_items_to_remove:
@@ -516,33 +459,6 @@ class Resize:
                 return image, labels
 
 
-class ResizeRandomInterp:
-    def __init__(self,
-                 height,
-                 width,
-                 interpolation_modes=[cv2.INTER_NEAREST,
-                                      cv2.INTER_LINEAR,
-                                      cv2.INTER_CUBIC,
-                                      cv2.INTER_AREA,
-                                      cv2.INTER_LANCZOS4],
-                 box_filter=None,
-                 labels_format={'class_id': 0, 'xmin': 1, 'ymin': 2, 'xmax': 3, 'ymax': 4}):
-        self.height = height
-        self.width = width
-        self.interpolation_modes = interpolation_modes
-        self.box_filter = box_filter
-        self.labels_format = labels_format
-        self.resize = Resize(height=self.height,
-                             width=self.width,
-                             box_filter=self.box_filter,
-                             labels_format=self.labels_format)
-
-    def __call__(self, image, labels=None, return_inverter=False):
-        self.resize.interpolation_mode = np.random.choice(self.interpolation_modes)
-        self.resize.labels_format = self.labels_format
-        return self.resize(image, labels, return_inverter)
-
-
 class Flip:
     def __init__(self,
                  dim='horizontal',
@@ -595,63 +511,6 @@ class RandomFlip:
             return image
         else:
             return image, labels
-
-
-class Translate:
-    def __init__(self,
-                 dy,
-                 dx,
-                 clip_boxes=True,
-                 box_filter=None,
-                 background=(0, 0, 0),
-                 labels_format={'class_id': 0, 'xmin': 1, 'ymin': 2, 'xmax': 3, 'ymax': 4}):
-        self.dy_rel = dy
-        self.dx_rel = dx
-        self.clip_boxes = clip_boxes
-        self.box_filter = box_filter
-        self.background = background
-        self.labels_format = labels_format
-
-    def __call__(self, image, labels=None):
-
-        image_height, image_width = image.shape[:2]
-
-        dy_abs = int(round(image_height * self.dy_rel))
-        dx_abs = int(round(image_width * self.dx_rel))
-        M = np.float32([[1, 0, dx_abs],
-                        [0, 1, dy_abs]])
-
-        image = cv2.warpAffine(image,
-                               M=M,
-                               dsize=(image_width, image_height),
-                               borderMode=cv2.BORDER_CONSTANT,
-                               borderValue=self.background)
-
-        if labels is None:
-            return image
-        else:
-            xmin = self.labels_format['xmin']
-            ymin = self.labels_format['ymin']
-            xmax = self.labels_format['xmax']
-            ymax = self.labels_format['ymax']
-
-            labels = np.copy(labels)
-
-            labels[:, [xmin, xmax]] += dx_abs
-            labels[:, [ymin, ymax]] += dy_abs
-
-            if not (self.box_filter is None):
-                self.box_filter.labels_format = self.labels_format
-                labels = self.box_filter(labels=labels,
-                                         image_height=image_height,
-                                         image_width=image_width)
-
-            if self.clip_boxes:
-                labels[:, [ymin, ymax]] = np.clip(labels[:, [ymin, ymax]], a_min=0, a_max=image_height - 1)
-                labels[:, [xmin, xmax]] = np.clip(labels[:, [xmin, xmax]], a_min=0, a_max=image_width - 1)
-
-            return image, labels
-
 
 class Scale:
     def __init__(self,
@@ -1156,118 +1015,6 @@ class Pad:
         self.pad.labels_format = self.labels_format
 
         return self.pad(image, labels, return_inverter)
-
-
-class RandomPatch:
-    def __init__(self,
-                 patch_coord_generator,
-                 box_filter=None,
-                 image_validator=None,
-                 n_trials_max=3,
-                 clip_boxes=True,
-                 prob=1.0,
-                 background=(0, 0, 0),
-                 can_fail=False,
-                 labels_format={'class_id': 0, 'xmin': 1, 'ymin': 2, 'xmax': 3, 'ymax': 4}):
-        self.patch_coord_generator = patch_coord_generator
-        self.box_filter = box_filter
-        self.image_validator = image_validator
-        self.n_trials_max = n_trials_max
-        self.clip_boxes = clip_boxes
-        self.prob = prob
-        self.background = background
-        self.can_fail = can_fail
-        self.labels_format = labels_format
-        self.sample_patch = CropPad(patch_ymin=None,
-                                    patch_xmin=None,
-                                    patch_height=None,
-                                    patch_width=None,
-                                    clip_boxes=self.clip_boxes,
-                                    box_filter=self.box_filter,
-                                    background=self.background,
-                                    labels_format=self.labels_format)
-
-    def __call__(self, image, labels=None, return_inverter=False):
-
-        p = np.random.uniform(0, 1)
-        if p >= (1.0 - self.prob):
-
-            image_height, image_width = image.shape[:2]
-            self.patch_coord_generator.image_height = image_height
-            self.patch_coord_generator.image_width = image_width
-
-            xmin = self.labels_format['xmin']
-            ymin = self.labels_format['ymin']
-            xmax = self.labels_format['xmax']
-            ymax = self.labels_format['ymax']
-
-            if not self.image_validator is None:
-                self.image_validator.labels_format = self.labels_format
-            self.sample_patch.labels_format = self.labels_format
-
-            for _ in range(max(1, self.n_trials_max)):
-
-                patch_ymin, patch_xmin, patch_height, patch_width = self.patch_coord_generator()
-
-                self.sample_patch.patch_ymin = patch_ymin
-                self.sample_patch.patch_xmin = patch_xmin
-                self.sample_patch.patch_height = patch_height
-                self.sample_patch.patch_width = patch_width
-
-                if (labels is None) or (self.image_validator is None):
-
-                    return self.sample_patch(image, labels, return_inverter)
-                else:
-
-                    new_labels = np.copy(labels)
-                    new_labels[:, [ymin, ymax]] -= patch_ymin
-                    new_labels[:, [xmin, xmax]] -= patch_xmin
-
-                    if self.image_validator(labels=new_labels,
-                                            image_height=patch_height,
-                                            image_width=patch_width):
-                        return self.sample_patch(image, labels, return_inverter)
-
-            if self.can_fail:
-
-                if labels is None:
-                    if return_inverter:
-                        return None, None
-                    else:
-                        return None
-                else:
-                    if return_inverter:
-                        return None, None, None
-                    else:
-                        return None, None
-            else:
-
-                if labels is None:
-                    if return_inverter:
-                        return image, None
-                    else:
-                        return image
-                else:
-                    if return_inverter:
-                        return image, labels, None
-                    else:
-                        return image, labels
-
-        else:
-            if return_inverter:
-                def inverter(labels):
-                    return labels
-
-            if labels is None:
-                if return_inverter:
-                    return image, inverter
-                else:
-                    return image
-            else:
-                if return_inverter:
-                    return image, labels, inverter
-                else:
-                    return image, labels
 
 
 class RandomPatchInf:
