@@ -1,6 +1,6 @@
 import tensorflow as tf
 
-class SSDLoss:
+class Loss:
     def __init__(
         self,
         neg_pos_ratio=3,

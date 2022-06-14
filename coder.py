@@ -23,7 +23,7 @@ def match_box_order(weight_matrix):
     return matches
 
 
-class SSDInputEncoder:
+class InputEncoder:
     def __init__(
         self,
         image_height, image_width,

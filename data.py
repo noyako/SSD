@@ -1,6 +1,4 @@
 import numpy as np
-import inspect
-import warnings
 import sklearn.utils
 from copy import deepcopy
 from PIL import Image
@@ -10,7 +8,7 @@ import sys
 from tqdm import tqdm, trange
 import h5py
 import pickle
-from coder import SSDInputEncoder
+from coder import InputEncoder
 from box import iou
 
 class RandomCrop:
@@ -438,7 +436,7 @@ class DataGenerator:
 
             if not (label_encoder is None or self.labels is None):
 
-                if ('matched_anchors' in returns) and isinstance(label_encoder, SSDInputEncoder):
+                if ('matched_anchors' in returns) and isinstance(label_encoder, InputEncoder):
                     batch_y_encoded, batch_matched_anchors = label_encoder(batch_y, diagnostics=True)
                 else:
                     batch_y_encoded = label_encoder(batch_y, diagnostics=False)
