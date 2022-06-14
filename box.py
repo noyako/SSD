@@ -12,7 +12,7 @@ def convert_coordinates(tensor, start_index):
 
     return tcopy
 
-def intersection_area(boxes1, boxes2):
+def intersection_S(boxes1, boxes2):
     boxes1 = np.expand_dims(boxes1, axis=0)
     boxes2 = np.expand_dims(boxes2, axis=0)
 
@@ -41,7 +41,7 @@ def iou(boxes1, boxes2):
     boxes1 = convert_coordinates(boxes1, start_index=0)
     boxes2 = convert_coordinates(boxes2, start_index=0)
 
-    intersection_areas = intersection_area(boxes1, boxes2)
+    intersection_areas = intersection_S(boxes1, boxes2)
 
     m = boxes1.shape[0] 
     n = boxes2.shape[0] 

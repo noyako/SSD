@@ -13,7 +13,7 @@ import pickle
 from coder import SSDInputEncoder
 from box import iou
 
-class SSDRandomCrop:
+class RandomCrop:
     def __init__(self, labels_format={'class_id': 0, 'xmin': 1, 'ymin': 2, 'xmax': 3, 'ymax': 4}):
         self.labels_format = labels_format
         self.bound_generator = BoundGenerator(sample_space=((None, None),
@@ -54,7 +54,7 @@ class SSDRandomCrop:
         return self.random_crop(image, labels, return_inverter)
 
 
-class SSDExpand:
+class Expand:
     def __init__(self, background=(123, 117, 104),
                  labels_format={'class_id': 0, 'xmin': 1, 'ymin': 2, 'xmax': 3, 'ymax': 4}):
         self.labels_format = labels_format
@@ -76,7 +76,7 @@ class SSDExpand:
         return self.expand(image, labels, return_inverter)
 
 
-class SSDPhotometricDistortions:
+class PhotometricDistortions:
     def __init__(self):
         self.convert_RGB_to_HSV = ConvertColor(current='RGB', to='HSV')
         self.convert_HSV_to_RGB = ConvertColor(current='HSV', to='RGB')
@@ -87,7 +87,7 @@ class SSDPhotometricDistortions:
         self.random_contrast = RandomContrast(lower=0.5, upper=1.5, prob=0.5)
         self.random_saturation = RandomSaturation(lower=0.5, upper=1.5, prob=0.5)
         self.random_hue = RandomHue(max_delta=18, prob=0.5)
-        self.random_channel_swap = RandomChannelSwap(prob=0.0)
+        self.random_channel_swap = RandomChannelSwap(prob=0.01)
 
         self.sequence = [self.convert_to_3_channels,
                           self.convert_to_float32,
@@ -108,7 +108,7 @@ class SSDPhotometricDistortions:
         return image, labels
 
 
-class SSDDataAugmentation:
+class DataAugmentation:
     def __init__(self,
                  image_height=300,
                  image_width=300,
@@ -117,9 +117,9 @@ class SSDDataAugmentation:
 
         self.labels_format = labels_format
 
-        self.photometric_distortions = SSDPhotometricDistortions()
-        self.expand = SSDExpand(background=background, labels_format=self.labels_format)
-        self.random_crop = SSDRandomCrop(labels_format=self.labels_format)
+        self.photometric_distortions = PhotometricDistortions()
+        self.expand = Expand(background=background, labels_format=self.labels_format)
+        self.random_crop = RandomCrop(labels_format=self.labels_format)
         self.random_flip = RandomFlip(dim='horizontal', prob=0.5, labels_format=self.labels_format)
 
         self.box_filter = BoxFilter(check_overlap=False,
@@ -422,28 +422,6 @@ class DataGenerator:
 
                     batch_inverse_transforms.append(inverse_transforms[::-1])
 
-                if not (self.labels is None):
-
-                    xmin = self.labels_format['xmin']
-                    ymin = self.labels_format['ymin']
-                    xmax = self.labels_format['xmax']
-                    ymax = self.labels_format['ymax']
-
-                    if np.any(batch_y[i][:, xmax] - batch_y[i][:, xmin] <= 0) or np.any(
-                            batch_y[i][:, ymax] - batch_y[i][:, ymin] <= 0):
-                        if degenerate_box_handling == 'warn':
-                            warnings.warn(
-                                "Detected degenerate ground truth bounding boxes for batch item {} with bounding boxes {}, ".format(
-                                    i, batch_y[i]) +
-                                "i.e. bounding boxes where xmax <= xmin and/or ymax <= ymin. " +
-                                "This could mean that your dataset contains degenerate ground truth boxes, or that any image transformations you may apply might " +
-                                "result in degenerate ground truth boxes, or that you are parsing the ground truth in the wrong coordinate format." +
-                                "Degenerate ground truth bounding boxes may lead to NaN errors during the training.")
-                        elif degenerate_box_handling == 'remove':
-                            batch_y[i] = box_filter(batch_y[i])
-                            if (batch_y[i].size == 0) and not keep_images_without_gt:
-                                batch_items_to_remove.append(i)
-
             if batch_items_to_remove:
                 for j in sorted(batch_items_to_remove, reverse=True):
 
@@ -472,13 +450,6 @@ class DataGenerator:
 
             ret = []
             if 'processed_images' in returns: ret.append(batch_X)
-            if 'encoded_labels' in returns: ret.append(batch_y_encoded)
-            if 'matched_anchors' in returns: ret.append(batch_matched_anchors)
-            if 'processed_labels' in returns: ret.append(batch_y)
-            if 'filenames' in returns: ret.append(batch_filenames)
-            if 'image_ids' in returns: ret.append(batch_image_ids)
-            if 'evaluation-neutral' in returns: ret.append(batch_eval_neutral)
-            if 'inverse_transform' in returns: ret.append(batch_inverse_transforms)
             if 'original_images' in returns: ret.append(batch_original_images)
             if 'original_labels' in returns: ret.append(batch_original_labels)
 
@@ -863,48 +834,14 @@ class BoxFilter:
             requirements_met *= min_area_met
 
         if self.check_overlap:
-
             if isinstance(self.overlap_bounds, BoundGenerator):
                 lower, upper = self.overlap_bounds()
             else:
                 lower, upper = self.overlap_bounds
 
-            if self.overlap_criterion == 'iou':
-
-                image_coords = np.array([0, 0, image_width, image_height])
-
-                image_boxes_iou = iou(image_coords, labels[:, [xmin, ymin, xmax, ymax]])
-                requirements_met *= (image_boxes_iou > lower) * (image_boxes_iou <= upper)
-
-            elif self.overlap_criterion == 'area':
-                if self.border_pixels == 'half':
-                    d = 0
-                elif self.border_pixels == 'include':
-                    d = 1
-                elif self.border_pixels == 'exclude':
-                    d = -1
-
-                box_areas = (labels[:, xmax] - labels[:, xmin] + d) * (labels[:, ymax] - labels[:, ymin] + d)
-
-                clipped_boxes = np.copy(labels)
-                clipped_boxes[:, [ymin, ymax]] = np.clip(labels[:, [ymin, ymax]], a_min=0, a_max=image_height - 1)
-                clipped_boxes[:, [xmin, xmax]] = np.clip(labels[:, [xmin, xmax]], a_min=0, a_max=image_width - 1)
-                intersection_areas = (clipped_boxes[:, xmax] - clipped_boxes[:, xmin] + d) * (
-                            clipped_boxes[:, ymax] - clipped_boxes[:, ymin] + d)
-
-                if lower == 0.0:
-                    mask_lower = intersection_areas > lower * box_areas
-                else:
-                    mask_lower = intersection_areas >= lower * box_areas
-                mask_upper = intersection_areas <= upper * box_areas
-                requirements_met *= mask_lower * mask_upper
-
-            elif self.overlap_criterion == 'center_point':
-
-                cy = (labels[:, ymin] + labels[:, ymax]) / 2
-                cx = (labels[:, xmin] + labels[:, xmax]) / 2
-
-                requirements_met *= (cy >= 0.0) * (cy <= image_height - 1) * (cx >= 0.0) * (cx <= image_width - 1)
+            image_coords = np.array([0, 0, image_width, image_height])
+            image_boxes_iou = iou(image_coords, labels[:, [xmin, ymin, xmax, ymax]])
+            requirements_met *= (image_boxes_iou > lower) * (image_boxes_iou <= upper)
 
         return labels[requirements_met]
 
